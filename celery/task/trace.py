@@ -21,6 +21,7 @@ import sys
 
 from warnings import warn
 
+from kombu.serialization import decode as decode_message
 from kombu.utils import kwdict
 
 from celery import current_app
@@ -29,10 +30,12 @@ from celery._state import _task_stack
 from celery.app import set_default_app
 from celery.app.task import Task as BaseTask, Context
 from celery.datastructures import ExceptionInfo
-from celery.exceptions import Ignore, RetryTaskError
+from celery.exceptions import Ignore, RetryTaskError, InvalidTaskError
 from celery.utils.log import get_logger
 from celery.utils.objects import mro_lookup
 from celery.utils.serialization import get_pickleable_exception
+
+NEEDS_KWDICT = sys.version_info <= (2, 6)
 
 _logger = get_logger(__name__)
 
@@ -183,8 +186,15 @@ def build_tracer(name, task, loader=None, hostname=None, store_errors=True,
 
     def trace_task(uuid, args, kwargs, request=None):
         R = I = None
-        kwargs = kwdict(kwargs)
         try:
+            try:
+                kwargs.items
+            except AttributeError:
+                raise InvalidTaskError(
+                    'Task keyword arguments is not a mapping',
+                )
+            if NEEDS_KWDICT:
+                kwargs = kwdict(kwargs)
             push_task(task)
             task_request = Context(request or {}, args=args,
                                    called_directly=False, kwargs=kwargs)
@@ -280,10 +290,16 @@ def _trace_task_ret(name, uuid, args, kwargs, request={}, **opts):
 trace_task_ret = _trace_task_ret
 
 
-def _fast_trace_task(task, uuid, args, kwargs, request={}):
+def _fast_trace_task(task, uuid, headers, body, content_type,
+                     content_encoding, **request):
     # setup_worker_optimizations will point trace_task_ret to here,
     # so this is the function used in the worker.
-    return _tasks[task].__trace__(uuid, args, kwargs, request)[0]
+    payload = decode_message(body, content_type, content_encoding)
+    payload.update(request)
+    payload.update(headers)
+    return _tasks[task].__trace__(
+        uuid, payload['args'], payload['kwargs'], payload,
+    )[0]
 
 
 def eager_trace_task(task, uuid, args, kwargs, request=None, **opts):

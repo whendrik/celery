@@ -223,25 +223,31 @@ class TaskProducer(Producer):
         eta = eta and eta.isoformat()
         expires = expires and expires.isoformat()
 
-        body = {
+        headers = {
             'task': task_name,
-            'id': task_id,
+            'task_id': task_id,
+            'utc': self.utc,
+            'reply_to': reply_to,
+            'timeouts': timeouts or [timeout, soft_timeout],
+        }
+
+        if eta:
+            headers['eta'] = eta
+        if expires:
+            headers['expires'] = expires
+
+        body = {
             'args': task_args,
             'kwargs': task_kwargs,
             'retries': retries or 0,
-            'eta': eta,
-            'expires': expires,
-            'utc': self.utc,
             'callbacks': callbacks,
             'errbacks': errbacks,
-            'reply_to': reply_to,
-            'timeouts': timeouts or (timeout, soft_timeout),
             'taskset': group_id or taskset_id,
             'chord': chord,
         }
 
         self.publish(
-            body,
+            body, headers=headers,
             exchange=exchange, routing_key=routing_key,
             serializer=serializer or self.serializer,
             compression=compression or self.compression,
