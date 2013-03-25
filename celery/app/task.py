@@ -470,7 +470,6 @@ class Task(object):
                                      callbacks=maybe_list(link),
                                      errbacks=maybe_list(link_error),
                                      **options)
-            print('EXITING BLOCK')
         result = self.AsyncResult(task_id)
         if add_to_parent:
             parent = get_current_worker_task()

@@ -427,7 +427,6 @@ class Consumer(object):
                     hb * 1000.0 / hbrate, hbtick, (hbrate, ))
 
             def on_task_received(message):
-                print('RECEIVED: %r' % (message, ))
                 headers = message.headers
                 if on_task_callbacks:
                     [callback() for callback in on_task_callbacks]
