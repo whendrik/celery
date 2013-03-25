@@ -322,8 +322,8 @@ class Consumer(object):
             self.event_dispatcher.send(
                 'task-received',
                 uuid=task.id, name=task.name,
-                args=safe_repr(task.args), kwargs=safe_repr(task.kwargs),
-                retries=task.request_dict.get('retries', 0),
+                args='', kwargs='',  # XXX
+                retries=0,  # XXX
                 eta=task.eta and task.eta.isoformat(),
                 expires=task.expires and task.expires.isoformat(),
             )

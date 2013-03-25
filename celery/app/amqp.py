@@ -227,10 +227,11 @@ class TaskProducer(Producer):
             'task': task_name,
             'task_id': task_id,
             'utc': self.utc,
-            'reply_to': reply_to,
-            'timeouts': timeouts or [timeout, soft_timeout],
+            'timeouts': timeouts or [timeout or 0, soft_timeout or 0],
         }
 
+        if reply_to:
+            headers['reply_to'] = reply_to
         if eta:
             headers['eta'] = eta
         if expires:

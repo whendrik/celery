@@ -291,7 +291,8 @@ trace_task_ret = _trace_task_ret
 
 
 def _fast_trace_task(task, uuid, headers, body, content_type,
-                     content_encoding, **request):
+                     content_encoding, decode_message=decode_message,
+                     **request):
     # setup_worker_optimizations will point trace_task_ret to here,
     # so this is the function used in the worker.
     payload = decode_message(body, content_type, content_encoding)

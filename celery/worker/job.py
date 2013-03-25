@@ -108,7 +108,7 @@ class Request(object):
         self.app = app or app_or_default(app)
         self.body = body
         self.headers = headers
-        self.content_type = content_type,
+        self.content_type = content_type
         self.content_encoding = content_encoding
         name = self.name = headers['task']
         self.id = headers['task_id']
@@ -196,12 +196,14 @@ class Request(object):
         task = self.task
         if self.revoked():
             raise TaskRevokedError(self.id)
+        body = self.body
 
         timeout, soft_timeout = self.timeouts
         result = pool.apply_async(
             trace_task_ret,
             args=(self.name, self.id,
-                  self.headers, self.body,
+                  self.headers,
+                  bytes(body) if isinstance(body, buffer) else body,
                   self.content_type, self.content_encoding),
             kwargs={
                 'hostname': self.hostname,
