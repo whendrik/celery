@@ -9,6 +9,281 @@
 
 If you're looking for versions prior to 3.0.x you should go to :ref:`history`.
 
+.. _version-3.0.17:
+
+3.0.17
+======
+:release-date: 2013-03-22 04:00:00 P.M UTC
+
+- Now depends on kombu 2.5.8
+
+- Now depends on billiard 2.7.3.23
+
+- RabbitMQ/Redis: thread-less and lock-free rate-limit implementation.
+
+    This means that rate limits pose minimal overhead when used with
+    RabbitMQ/Redis or future transports using the eventloop,
+    and that the rate-limit implementation is now thread-less and lock-free.
+
+    The thread-based transports will still use the old implementation for
+    now, but the plan is to use the timer also for other
+    broker transports in Celery 3.1.
+
+- Rate limits now works with eventlet/gevent if using RabbitMQ/Redis as the
+  broker.
+
+- A regression caused ``task.retry`` to ignore additional keyword arguments.
+
+    Extra keyword arguments are now used as execution options again.
+    Fix contributed by Simon Engledew.
+
+- Windows: Fixed problem with the worker trying to pickle the Django settings
+  module at worker startup.
+
+- generic-init.d:  No longer double quotes ``$CELERYD_CHDIR`` (Issue #1235).
+
+- generic-init.d: Removes bash-specific syntax.
+
+    Fix contributed by Pär Wieslander.
+
+- Cassandra Result Backend: Now handles the
+  :exc:`~pycassa.AllServersUnavailable` error (Issue #1010).
+
+    Fix contributed by Jared Biel.
+
+- Result: Now properly forwards apps to GroupResults when deserializing
+  (Issue #1249).
+
+    Fix contributed by Charles-Axel Dein.
+
+- ``GroupResult.revoke`` now supports the ``terminate`` and ``signal``
+  keyword arguments.
+
+- Worker: Multiprocessing pool workers now import task modules/configuration
+  before setting up the logging system so that logging signals can be
+  connected before they're dispatched.
+
+- chord:  The ``AsyncResult`` instance returned now has its ``parent``
+  attribute set to the header ``GroupResult``.
+
+    This is consistent with how ``chain`` works.
+
+.. _version-3.0.16:
+
+3.0.16
+======
+:release-date: 2013-03-07 04:00:00 P.M UTC
+
+- Happy International Women's Day!
+
+    We have a long way to go, so this is a chance for you to get involved in one
+    of the organizations working for making our communities more
+    diverse.
+
+     - PyLadies — http://pyladies.com
+     - Girls Who Code — http://www.girlswhocode.com
+     - Women Who Code — http://www.meetup.com/Women-Who-Code-SF/
+
+- Now depends on :mod:`kombu` version 2.5.7
+
+- Now depends on :mod:`billiard` version 2.7.3.22
+
+- AMQP heartbeats are now disabled by default.
+
+    Some users experiences issues with heartbeats enabled,
+    and it's not strictly necessary to use them.
+
+    If you're experiencing problems detecting connection failures,
+    you can re-enable heartbeats by configuring the :setting:`BROKER_HEARTBEAT`
+    setting.
+
+- Worker: Now propagates connection errors occurring in multiprocessing
+  callbacks, so that the connection can be reset (Issue #1226).
+
+- Worker: Now propagates connection errors occurring in timer callbacks,
+  so that the connection can be reset.
+
+- The modules in :setting:`CELERY_IMPORTS` and :setting:`CELERY_INCLUDE`
+  are now imported in the original order (Issue #1161).
+
+    The modules in :setting:`CELERY_IMPORTS` will be imported first,
+    then continued by :setting:`CELERY_INCLUDE`.
+
+    Thanks to Joey Wilhelm.
+
+- New bash completion for ``celery`` available in the git repository:
+
+    https://github.com/celery/celery/tree/3.0/extra/bash-completion
+
+    You can source this file or put it in ``bash_completion.d`` to
+    get auto-completion for the ``celery`` command-line utility.
+
+- The node name of a worker can now include unicode characters (Issue #1186).
+
+- The repr of a ``crontab`` object now displays correctly (Issue #972).
+
+- ``events.State`` no longer modifies the original event dictionary.
+
+- No longer uses ``Logger.warn`` deprecated in Python 3.
+
+- Cache Backend: Now works with chords again (Issue #1094).
+
+- Chord unlock now handles errors occurring while calling the callback.
+
+- Generic worker init.d script: Status check is now performed by
+  querying the pid of the instance instead of sending messages.
+
+    Contributed by Milen Pavlov.
+
+- Improved init scripts for CentOS.
+
+    - Updated to support celery 3.x conventions.
+    - Now uses CentOS built-in ``status`` and ``killproc``
+    - Support for multi-node / multi-pid worker services.
+    - Standard color-coded CentOS service-init output.
+    - A test suite.
+
+    Contributed by Milen Pavlov.
+
+- ``ResultSet.join`` now always works with empty result set (Issue #1219).
+
+- A ``group`` consisting of a single task is now supported (Issue #1219).
+
+- Now supports the ``pycallgraph`` program (Issue #1051).
+
+- Fixed Jython compatibility problems.
+
+- Django tutorial: Now mentions that the example app must be added to
+  ``INSTALLED_APPS`` (Issue #1192).
+
+.. _version-3.0.15:
+
+3.0.15
+======
+:release-date: 2013-02-11 04:30:00 P.M UTC
+
+- Now depends on billiard 2.7.3.21 which fixed a syntax error crash.
+
+- Fixed bug with :setting:`CELERY_SEND_TASK_SENT_EVENT`.
+
+.. _version-3.0.14:
+
+3.0.14
+======
+:release-date: 2013-02-08 05:00:00 P.M UTC
+
+- Now depends on Kombu 2.5.6
+
+- Now depends on billiard 2.7.3.20
+
+- ``execv`` is now disabled by default.
+
+    It was causing too many problems for users, you can still enable
+    it using the :setting:`CELERYD_FORCE_EXECV` setting.
+
+    execv was only enabled when transports other than amqp/redis was used,
+    and it's there to prevent deadlocks caused by mutexes not being released
+    before the process forks.  Sadly it also changes the environment
+    introducing many corner case bugs that is hard to fix without adding
+    horrible hacks.  Deadlock issues are reported far less often than the
+    bugs that execv are causing, so we now disable it by default.
+
+    Work is in motion to create non-blocking versions of these transports
+    so that execv is not necessary (which is the situation with the amqp
+    and redis broker transports)
+
+- Chord exception behavior defined (Issue #1172).
+
+    From Celery 3.1 the chord callback will change state to FAILURE
+    when a task part of a chord raises an exception.
+
+    It was never documented what happens in this case,
+    and the actual behavior was very unsatisfactory, indeed
+    it will just forward the exception value to the chord callback.
+
+    For backward compatibility reasons we do not change to the new
+    behavior in a bugfix release, even if the current behavior was
+    never documented.  Instead you can enable the
+    :setting:`CELERY_CHORD_PROPAGATES` setting to get the new behavior
+    that will be default from Celery 3.1.
+
+    See more at :ref:`chord-errors`.
+
+- worker: Fixes bug with ignored and retried tasks.
+
+    The ``on_chord_part_return`` and ``Task.after_return`` callbacks,
+    nor the ``task_postrun`` signal should be called when the task was
+    retried/ignored.
+
+    Fix contributed by Vlad.
+
+- ``GroupResult.join_native`` now respects the ``propagate`` argument.
+
+- ``subtask.id`` added as an alias to ``subtask['options'].id``
+
+    .. code-block:: python
+
+        >>> s = add.s(2, 2)
+        >>> s.id = 'my-id'
+        >>> s['options']
+        {'task_id': 'my-id'}
+
+        >>> s.id
+        'my-id'
+
+- worker: Fixed error `Could not start worker processes` occurring
+  when restarting after connection failure (Issue #1118).
+
+- Adds new signal :signal:`task-retried` (Issue #1169).
+
+- `celery events --dumper` now handles connection loss.
+
+- Will now retry sending the task-sent event in case of connection failure.
+
+- amqp backend:  Now uses ``Message.requeue`` instead of republishing
+  the message after poll.
+
+- New :setting:`BROKER_HEARTBEAT_CHECKRATE` setting introduced to modify the
+  rate at which broker connection heartbeats are monitored.
+
+    The default value was also changed from 3.0 to 2.0.
+
+- :class:`celery.events.state.State` is now pickleable.
+
+    Fix contributed by Mher Movsisyan.
+
+- :class:`celery.datastructures.LRUCache` is now pickleable.
+
+    Fix contributed by Mher Movsisyan.
+
+- The stats broadcast command now includes the workers pid.
+
+    Contributed by Mher Movsisyan.
+
+- New ``conf`` remote control command to get a workers current configuration.
+
+    Contributed by Mher Movsisyan.
+
+- Adds the ability to modify the chord unlock task's countdown
+  argument (Issue #1146).
+
+    Contributed by Jun Sakai
+
+- beat: The scheduler now uses the `now()`` method of the schedule,
+  so that schedules can provide a custom way to get the current date and time.
+
+    Contributed by Raphaël Slinckx
+
+- Fixed pickling of configuration modules on Windows or when execv is used
+  (Issue #1126).
+
+- Multiprocessing logger is now configured with loglevel ``ERROR``
+  by default.
+
+    Since 3.0 the multiprocessing loggers were disabled by default
+    (only configured when the :envvar:`MP_LOG` environment variable was set).
+
+
 .. _version-3.0.13:
 
 3.0.13

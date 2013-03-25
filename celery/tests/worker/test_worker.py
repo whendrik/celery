@@ -26,7 +26,7 @@ from celery.task import periodic_task as periodic_task_dec
 from celery.utils import uuid
 from celery.worker import WorkController
 from celery.worker import components
-from celery.worker.buckets import FastQueue
+from celery.worker.buckets import FastQueue, AsyncTaskBucket
 from celery.worker.job import Request
 from celery.worker import consumer
 from celery.worker.consumer import Consumer as __Consumer
@@ -1030,15 +1030,27 @@ class test_WorkController(AppCase):
         self.assertIsNone(worker.mediator)
         self.assertEqual(worker.ready_queue.put, worker.process_task)
 
+    def test_enable_rate_limits_eventloop(self):
+        try:
+            worker = self.create_worker(disable_rate_limits=False,
+                                        use_eventloop=True,
+                                        pool_cls='processes')
+        except ImportError:
+            raise SkipTest('multiprocessing not supported')
+        self.assertIsInstance(worker.ready_queue, AsyncTaskBucket)
+        self.assertFalse(worker.mediator)
+        self.assertNotEqual(worker.ready_queue.put, worker.process_task)
+
     def test_disable_rate_limits_processes(self):
         try:
             worker = self.create_worker(disable_rate_limits=True,
+                                        use_eventloop=False,
                                         pool_cls='processes')
         except ImportError:
             raise SkipTest('multiprocessing not supported')
         self.assertIsInstance(worker.ready_queue, FastQueue)
-        self.assertTrue(worker.mediator)
-        self.assertNotEqual(worker.ready_queue.put, worker.process_task)
+        self.assertFalse(worker.mediator)
+        self.assertEqual(worker.ready_queue.put, worker.process_task)
 
     def test_process_task_sem(self):
         worker = self.worker
@@ -1133,6 +1145,7 @@ class test_WorkController(AppCase):
 
     def test_Pool_crate_threaded(self):
         w = Mock()
+        w._conninfo.connection_errors = w._conninfo.channel_errors = ()
         w.pool_cls = Mock()
         w.use_eventloop = False
         pool = components.Pool(w)
@@ -1141,12 +1154,14 @@ class test_WorkController(AppCase):
     def test_Pool_create(self):
         from celery.worker.hub import BoundedSemaphore
         w = Mock()
+        w._conninfo.connection_errors = w._conninfo.channel_errors = ()
         w.hub = Mock()
         w.hub.on_init = []
         w.pool_cls = Mock()
         P = w.pool_cls.return_value = Mock()
         P.timers = {Mock(): 30}
         w.use_eventloop = True
+        w.consumer.restart_count = -1
         pool = components.Pool(w)
         pool.create(w)
         self.assertIsInstance(w.semaphore, BoundedSemaphore)
@@ -1180,6 +1195,7 @@ class test_WorkController(AppCase):
         cbs['on_timeout_set'](result, None, 10)
         cbs['on_timeout_set'](result, None, None)
 
-        P.did_start_ok.return_value = False
         with self.assertRaises(WorkerLostError):
-            pool.on_poll_init(P, hub)
+            P.did_start_ok.return_value = False
+            w.consumer.restart_count = 0
+            pool.on_poll_init(P, w, hub)

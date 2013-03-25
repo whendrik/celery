@@ -33,9 +33,26 @@ app.conf.update(BROKER_URL="memory://",
 extensions = ['sphinx.ext.autodoc',
               'sphinx.ext.coverage',
               'sphinx.ext.pngmath',
+              'sphinx.ext.viewcode',
+              'sphinx.ext.coverage',
               'sphinx.ext.intersphinx',
               'sphinxcontrib.issuetracker',
               'celerydocs']
+
+
+LINKCODE_URL = 'http://github.com/{proj}/tree/{branch}/{filename}.py'
+GITHUB_PROJECT = 'celery/celery'
+GITHUB_BRANCH = 'master'
+
+def linkcode_resolve(domain, info):
+    if domain != 'py' or not info['module']:
+        return
+    filename = info['module'].replace('.', '/')
+    return LINKCODE_URL.format(
+        proj=GITHUB_PROJECT,
+        branch=GITHUB_BRANCH,
+        filename=FILENAME,
+    )
 
 html_show_sphinx = False
 

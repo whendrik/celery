@@ -105,6 +105,7 @@ from subprocess import Popen
 from time import sleep
 
 from kombu.utils import cached_property
+from kombu.utils.compat import OrderedDict
 from kombu.utils.encoding import from_utf8
 
 from celery import VERSION_BANNER
@@ -435,7 +436,7 @@ def multi_args(p, cmd='celery worker', append='', prefix='', suffix=''):
         except ValueError:
             pass
         else:
-            names = list(map(str, range(1, noderange + 1)))
+            names = [str(n) for n in range(1, noderange + 1)]
             prefix = 'celery'
     cmd = options.pop('--cmd', cmd)
     append = options.pop('--append', append)
@@ -478,10 +479,10 @@ class NamespacedOptionParser(object):
 
     def __init__(self, args):
         self.args = args
-        self.options = {}
+        self.options = OrderedDict()
         self.values = []
         self.passthrough = ''
-        self.namespaces = defaultdict(lambda: {})
+        self.namespaces = defaultdict(lambda: OrderedDict())
 
         self.parse()
 
@@ -517,7 +518,7 @@ class NamespacedOptionParser(object):
     def optmerge(self, ns, defaults=None):
         if defaults is None:
             defaults = self.options
-        return dict(defaults, **self.namespaces[ns])
+        return OrderedDict(defaults, **self.namespaces[ns])
 
     def add_option(self, name, value, short=False, ns=None):
         prefix = short and '-' or '--'
@@ -545,8 +546,9 @@ def parse_ns_range(ns, ranges=False):
     for space in ',' in ns and ns.split(',') or [ns]:
         if ranges and '-' in space:
             start, stop = space.split('-')
-            x = list(map(str, range(int(start), int(stop) + 1)))
-            ret.extend(x)
+            ret.extend(
+                str(n) for n in range(int(start), int(stop) + 1)
+            )
         else:
             ret.append(space)
     return ret

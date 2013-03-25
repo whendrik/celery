@@ -17,10 +17,11 @@ import signal as _signal
 import sys
 
 from billiard import current_process
+from kombu.utils.encoding import safe_str
 from contextlib import contextmanager
 
 from .local import try_import
-from .five import items, map, reraise, string_t
+from .five import items, map, range, reraise, string_t
 
 _setproctitle = try_import('setproctitle')
 resource = try_import('resource')
@@ -616,7 +617,7 @@ def set_process_title(progname, info=None):
     proctitle = '[{0}]'.format(progname)
     proctitle = '{0} {1}'.format(proctitle, info) if info else proctitle
     if _setproctitle:
-        _setproctitle.setproctitle(proctitle)
+        _setproctitle.setproctitle(safe_str(proctitle))
     return proctitle
 
 

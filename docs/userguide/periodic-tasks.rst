@@ -78,7 +78,7 @@ Example: Run the `tasks.add` task every 30 seconds.
     from datetime import timedelta
 
     CELERYBEAT_SCHEDULE = {
-        'runs-every-30-seconds': {
+        'add-every-30-seconds': {
             'task': 'tasks.add',
             'schedule': timedelta(seconds=30),
             'args': (16, 16)
@@ -88,9 +88,16 @@ Example: Run the `tasks.add` task every 30 seconds.
     CELERY_TIMEZONE = 'UTC'
 
 Using a :class:`~datetime.timedelta` for the schedule means the task will
-be executed 30 seconds after `celery beat` starts, and then every 30 seconds
-after the last run.  A crontab like schedule also exists, see the section
-on `Crontab schedules`_.
+be sent in 30 second intervals (the first task will be sent 30 seconds
+after `celery beat` starts, and then every 30 seconds
+after the last run).
+
+A crontab like schedule also exists, see the section on `Crontab schedules`_.
+
+Like with ``cron``, the tasks may overlap if the first task does not complete
+before the next.  If that is a concern you should use a locking
+strategy to ensure only one instance can run at a time (see for example
+:ref:`cookbook-task-serial`).
 
 .. _beat-entry-fields:
 
@@ -150,7 +157,7 @@ the :class:`~celery.schedules.crontab` schedule type:
 
     CELERYBEAT_SCHEDULE = {
         # Executes every Monday morning at 7:30 A.M
-        'every-monday-morning': {
+        'add-every-monday-morning': {
             'task': 'tasks.add',
             'schedule': crontab(hour=7, minute=30, day_of_week=1),
             'args': (16, 16),
@@ -170,7 +177,7 @@ The syntax of these crontab expressions are very flexible.  Some examples:
 |                                         | 3am, 6am, 9am, noon, 3pm, 6pm, 9pm.        |
 +-----------------------------------------+--------------------------------------------+
 | ``crontab(minute=0,``                   | Same as previous.                          |
-|         ``hour=[0,3,6,9,12,15,18,21])`` |                                            |
+|         ``hour='0,3,6,9,12,15,18,21')`` |                                            |
 +-----------------------------------------+--------------------------------------------+
 | ``crontab(minute='*/15')``              | Execute every 15 minutes.                  |
 +-----------------------------------------+--------------------------------------------+

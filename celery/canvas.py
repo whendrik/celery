@@ -12,7 +12,7 @@
 from __future__ import absolute_import
 
 from copy import deepcopy
-from functools import partial as _partial
+from functools import partial as _partial, reduce
 from operator import itemgetter
 from itertools import chain as _chain
 
@@ -31,17 +31,53 @@ Chord = Proxy(lambda: current_app.tasks['celery.chord'])
 
 
 class _getitem_property(object):
+    """Attribute -> dict key descriptor.
 
-    def __init__(self, key):
-        self.key = key
+    The target object must support ``__getitem__``,
+    and optionally ``__setitem__``.
+
+    Example:
+
+        class Me(dict):
+            deep = defaultdict(dict)
+
+            foo = _getitem_property('foo')
+            deep_thing = _getitem_property('deep.thing')
+
+
+        >>> me = Me()
+        >>> me.foo
+        None
+
+        >>> me.foo = 10
+        >>> me.foo
+        10
+        >>> me['foo']
+        10
+
+        >>> me.deep_thing = 42
+        >>> me.deep_thinge
+        42
+        >>> me.deep:
+        defaultdict(<type 'dict'>, {'thing': 42})
+
+    """
+
+    def __init__(self, keypath):
+        path, _, self.key = keypath.rpartition('.')
+        self.path = path.split('.') if path else None
+
+    def _path(self, obj):
+        return (reduce(lambda d, k: d[k], [obj] + self.path) if self.path
+                else obj)
 
     def __get__(self, obj, type=None):
         if obj is None:
             return type
-        return obj.get(self.key)
+        return self._path(obj).get(self.key)
 
     def __set__(self, obj, value):
-        obj[self.key] = value
+        self._path(obj)[self.key] = value
 
 
 class Signature(dict):
@@ -236,6 +272,7 @@ class Signature(dict):
             return self.type.apply_async
         except KeyError:
             return _partial(current_app.send_task, self['task'])
+    id = _getitem_property('options.task_id')
     task = _getitem_property('task')
     args = _getitem_property('args')
     kwargs = _getitem_property('kwargs')
@@ -346,8 +383,10 @@ Signature.register_type(chunks)
 def _maybe_group(tasks):
     if isinstance(tasks, group):
         tasks = list(tasks.tasks)
+    elif isinstance(tasks, Signature):
+        tasks = [tasks]
     else:
-        tasks = regen(tasks if is_list(tasks) else tasks)
+        tasks = regen(tasks)
     return tasks
 
 
@@ -434,8 +473,7 @@ class chord(Signature):
         if _chord.app.conf.CELERY_ALWAYS_EAGER:
             return self.apply((), kwargs)
         callback_id = body.options.setdefault('task_id', uuid())
-        _chord(**kwargs)
-        return _chord.AsyncResult(callback_id)
+        return _chord.AsyncResult(callback_id, parent=_chord(**kwargs))
 
     def clone(self, *args, **kwargs):
         s = Signature.clone(self, *args, **kwargs)

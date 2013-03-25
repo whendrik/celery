@@ -221,7 +221,7 @@ def ensure_process_aware_logger():
 
 
 def get_multiprocessing_logger():
-    return mputil.get_logger() if mputil and MP_LOG else None
+    return mputil.get_logger() if mputil else None
 
 
 def reset_multiprocessing_logger():
@@ -247,8 +247,6 @@ def _patch_logger_class():
 
                 def log(self, *args, **kwargs):
                     if _in_sighandler:
-                        print('CANNOT LOG IN SIGHANDLER',  # noqa
-                              file=sys.__stderr__)
                         return
                     return OldLoggerClass.log(self, *args, **kwargs)
             logging.setLoggerClass(SigSafeLogger)

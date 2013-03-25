@@ -45,6 +45,7 @@ def Event(type, _fields=None, **fields):
     """Create an event.
 
     An event is a dictionary, the only required field is ``type``.
+    A ``timestamp`` field will be set to the current time if not provided.
 
     """
     event = dict(_fields or {}, type=type, **fields)
@@ -54,11 +55,22 @@ def Event(type, _fields=None, **fields):
 
 
 def group_from(type):
+    """Get the group part of a event type name.
+
+    E.g.::
+
+        >>> group_from('task-sent')
+        'task'
+
+        >>> group_from('custom-my-event')
+        'custom'
+
+    """
     return type.split('-', 1)[0]
 
 
 class EventDispatcher(object):
-    """Send events as messages.
+    """Dispatches event messages.
 
     :param connection: Connection to the broker.
 
@@ -85,6 +97,12 @@ class EventDispatcher(object):
     """
     DISABLED_TRANSPORTS = set(['sql'])
 
+    # set of callbacks to be called when :meth:`enabled`.
+    on_enabled = None
+
+    # set of callbacks to be called when :meth:`disabled`.
+    on_disabled = None
+
     def __init__(self, connection=None, hostname=None, enabled=True,
                  channel=None, buffer_while_offline=True, app=None,
                  serializer=None, groups=None):
@@ -94,7 +112,7 @@ class EventDispatcher(object):
         self.hostname = hostname or socket.gethostname()
         self.buffer_while_offline = buffer_while_offline
         self.mutex = threading.Lock()
-        self.publisher = None
+        self.producer = None
         self._outbound_buffer = deque()
         self.serializer = serializer or self.app.conf.CELERY_EVENT_SERIALIZER
         self.on_enabled = set()
@@ -105,7 +123,9 @@ class EventDispatcher(object):
         if not connection and channel:
             self.connection = channel.connection.client
         self.enabled = enabled
-        if self.connection.transport.driver_type in self.DISABLED_TRANSPORTS:
+        conninfo = self.connection or self.app.connection()
+        self.exchange = get_exchange(conninfo)
+        if conninfo.transport.driver_type in self.DISABLED_TRANSPORTS:
             self.enabled = False
         if self.enabled:
             self.enable()
@@ -118,16 +138,10 @@ class EventDispatcher(object):
     def __exit__(self, *exc_info):
         self.close()
 
-    def get_exchange(self):
-        if self.connection:
-            return get_exchange(self.connection)
-        else:
-            return get_exchange(self.channel.connection.client)
-
     def enable(self):
-        self.publisher = Producer(self.channel or self.connection,
-                                  exchange=self.get_exchange(),
-                                  serializer=self.serializer)
+        self.producer = Producer(self.channel or self.connection,
+                                 exchange=self.exchange,
+                                 serializer=self.serializer)
         self.enabled = True
         for callback in self.on_enabled:
             callback()
@@ -139,39 +153,71 @@ class EventDispatcher(object):
             for callback in self.on_disabled:
                 callback()
 
-    def send(self, type, utcoffset=utcoffset, blind=False,
-             Event=Event, **fields):
+    def publish(self, type, fields, producer, retry=False,
+                retry_policy=None, blind=False, utcoffset=utcoffset,
+                Event=Event):
+        """Publish event using a custom :class:`~kombu.Producer`
+        instance.
+
+        :param type: Event type name, with group separated by dash (`-`).
+        :param fields: Dictionary of event fields, must be json serializable.
+        :param producer: :class:`~kombu.Producer` instance to use,
+            only the ``publish`` method will be called.
+        :keyword retry: Retry in the event of connection failure.
+        :keyword retry_policy: Dict of custom retry policy, see
+            :meth:`~kombu.Connection.ensure`.
+        :keyword blind: Don't set logical clock value (also do not forward
+            the internal logical clock).
+        :keyword Event: Event type used to create event,
+            defaults to :func:`Event`.
+        :keyword utcoffset: Function returning the current utcoffset in hours.
+
+        """
+
+        with self.mutex:
+            clock = None if blind else self.clock.forward()
+            event = Event(type, hostname=self.hostname, utcoffset=utcoffset(),
+                          pid=self.pid, clock=clock, **fields)
+            exchange = self.exchange
+            producer.publish(
+                event,
+                routing_key=type.replace('-', '.'),
+                exchange=exchange.name,
+                retry=retry,
+                retry_policy=retry_policy,
+                declare=[exchange],
+                serializer=self.serializer,
+                headers=self.headers,
+            )
+
+    def send(self, type, blind=False, **fields):
         """Send event.
 
-        :param type: Kind of event.
+        :param type: Event type name, with group separated by dash (`-`).
+        :keyword retry: Retry in the event of connection failure.
+        :keyword retry_policy: Dict of custom retry policy, see
+            :meth:`~kombu.Connection.ensure`.
+        :keyword blind: Don't set logical clock value (also do not forward
+            the internal logical clock).
+        :keyword Event: Event type used to create event,
+            defaults to :func:`Event`.
         :keyword utcoffset: Function returning the current utcoffset in hours.
-        :keyword blind: Do not send clock value
-        :keyword \*\*fields: Event arguments.
+        :keyword \*\*fields: Event fields, must be json serializable.
 
         """
         if self.enabled:
             groups = self.groups
             if groups and group_from(type) not in groups:
                 return
-
-            clock = None if blind else self.clock.forward()
-
-            with self.mutex:
-                event = Event(type,
-                              hostname=self.hostname,
-                              clock=clock,
-                              utcoffset=utcoffset(),
-                              pid=self.pid, **fields)
-                try:
-                    self.publisher.publish(event,
-                                           routing_key=type.replace('-', '.'),
-                                           headers=self.headers)
-                except Exception as exc:
-                    if not self.buffer_while_offline:
-                        raise
-                    self._outbound_buffer.append((type, fields, exc))
+            try:
+                self.publish(type, fields, self.producer, blind)
+            except Exception as exc:
+                if not self.buffer_while_offline:
+                    raise
+                self._outbound_buffer.append((type, fields, exc))
 
     def flush(self):
+        """Flushes the outbound buffer."""
         while self._outbound_buffer:
             try:
                 type, fields, _ = self._outbound_buffer.popleft()
@@ -180,12 +226,20 @@ class EventDispatcher(object):
             self.send(type, **fields)
 
     def copy_buffer(self, other):
+        """Copies the outbound buffer of another instance."""
         self._outbound_buffer = other._outbound_buffer
 
     def close(self):
         """Close the event dispatcher."""
         self.mutex.locked() and self.mutex.release()
-        self.publisher = None
+        self.producer = None
+
+    def _get_publisher(self):
+        return self.producer
+
+    def _set_publisher(self, producer):
+        self.producer = producer
+    publisher = property(_get_publisher, _set_publisher)  # XXX compat
 
 
 class EventReceiver(ConsumerMixin):
@@ -208,15 +262,13 @@ class EventReceiver(ConsumerMixin):
         self.routing_key = routing_key
         self.node_id = node_id or uuid()
         self.queue_prefix = queue_prefix
+        self.exchange = get_exchange(self.connection or self.app.connection())
         self.queue = Queue('.'.join([self.queue_prefix, self.node_id]),
-                           exchange=self.get_exchange(),
+                           exchange=self.exchange,
                            routing_key=self.routing_key,
                            auto_delete=True,
                            durable=False)
         self.adjust_clock = self.app.clock.adjust
-
-    def get_exchange(self):
-        return get_exchange(self.connection)
 
     def process(self, type, event):
         """Process the received event by dispatching it to the appropriate

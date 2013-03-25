@@ -102,6 +102,7 @@ to choose from, including
 
 * :ref:`Amazon SQS <broker-sqs>`
 * :ref:`broker-mongodb`
+* :ref:`IronMQ <broker-ironmq>`
 
 See also `Transport Comparison`_.
 
@@ -258,7 +259,7 @@ In case the task raised an exception, :meth:`~@AsyncResult.get` will
 re-raise the exception, but you can override this by specifying
 the ``propagate`` argument::
 
-    >>> result.get(propagate=True)
+    >>> result.get(propagate=False)
 
 
 If the task raised an exception you can also gain access to the

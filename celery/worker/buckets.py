@@ -6,7 +6,7 @@
     This module implements the rate limiting of tasks,
     by having a token bucket queue for each task type.
     When a task is allowed to be processed it's moved
-    over the the ``ready_queue``
+    over the ``ready_queue``
 
     The :mod:`celery.worker.mediator` is then responsible
     for moving tasks from the ``ready_queue`` to the worker pool.
@@ -28,6 +28,53 @@ from celery.utils import timeutils
 
 class RateLimitExceeded(Exception):
     """The token buckets rate limit has been exceeded."""
+
+
+class AsyncTaskBucket(object):
+
+    def __init__(self, task_registry, callback=None, worker=None):
+        self.task_registry = task_registry
+        self.callback = callback
+        self.worker = worker
+        self.buckets = {}
+        self.refresh()
+
+    def cont(self, request, bucket, tokens):
+        if not bucket.can_consume(tokens):
+            hold = bucket.expected_time(tokens)
+            self.worker.timer.apply_after(
+                hold * 1000.0, self.cont, (request, bucket, tokens),
+            )
+        else:
+            self.callback(request)
+
+    def put(self, request):
+        name = request.name
+        try:
+            bucket = self.buckets[name]
+        except KeyError:
+            bucket = self.add_bucket_for_type(name)
+        if not bucket:
+            return self.callback(request)
+        return self.cont(request, bucket, 1)
+
+    def add_task_type(self, name):
+        task_type = self.task_registry[name]
+        limit = getattr(task_type, 'rate_limit', None)
+        limit = timeutils.rate(limit)
+        bucket = self.buckets[name] = (
+            TokenBucket(limit, capacity=1) if limit else None
+        )
+        return bucket
+
+    def clear(self):
+        # called by the worker when the connection is lost,
+        # but this also clears out the timer so we be good.
+        pass
+
+    def refresh(self):
+        for name in self.task_registry:
+            self.add_task_type(name)
 
 
 class TaskBucket(object):
@@ -57,17 +104,19 @@ class TaskBucket(object):
 
     """
 
-    def __init__(self, task_registry):
+    def __init__(self, task_registry, callback=None, worker=None):
         self.task_registry = task_registry
         self.buckets = {}
         self.init_with_registry()
         self.immediate = deque()
         self.mutex = threading.Lock()
         self.not_empty = threading.Condition(self.mutex)
+        self.callback = callback
+        self.worker = worker
 
     def put(self, request):
         """Put a :class:`~celery.worker.job.Request` into
-        the appropiate bucket."""
+        the appropriate bucket."""
         if request.name not in self.buckets:
             self.add_bucket_for_type(request.name)
         self.buckets[request.name].put_nowait(request)
@@ -118,7 +167,7 @@ class TaskBucket(object):
             return min(remaining_times), None
 
     def get(self, block=True, timeout=None):
-        """Retrive the task from the first available bucket.
+        """Retrieve the task from the first available bucket.
 
         Available as in, there is an item in the queue and you can
         consume tokens from it.

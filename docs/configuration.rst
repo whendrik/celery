@@ -199,6 +199,10 @@ Can be one of the following:
     Use `Cassandra`_ to store the results.
     See :ref:`conf-cassandra-result-backend`.
 
+* ironcache
+    Use `IronCache`_ to store the results.
+    See :ref:`conf-ironcache-result-backend`.
+
 .. warning:
 
     While the AMQP result backend is very efficient, you must make sure
@@ -207,7 +211,7 @@ Can be one of the following:
 .. _`SQLAlchemy`: http://sqlalchemy.org
 .. _`memcached`: http://memcached.org
 .. _`MongoDB`: http://mongodb.org
-.. _`Redis`: http://code.google.com/p/redis/
+.. _`Redis`: http://redis.io
 .. _`Cassandra`: http://cassandra.apache.org/
 
 .. setting:: CELERY_RESULT_SERIALIZER
@@ -362,9 +366,9 @@ Using multiple memcached servers:
 .. setting:: CELERY_CACHE_BACKEND_OPTIONS
 
 
-The "dummy" backend stores the cache in memory only:
+The "memory" backend stores the cache in memory only:
 
-    CELERY_CACHE_BACKEND = "dummy"
+    CELERY_CACHE_BACKEND = "memory"
 
 CELERY_CACHE_BACKEND_OPTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -586,6 +590,33 @@ Example configuration
         'max_retries': 10
     }
 
+
+.. _conf-ironcache-result-backend:
+
+IronCache backend settings
+--------------------------
+
+.. note::
+
+    The Cassandra backend requires the :mod:`iron_celery` library:
+    http://pypi.python.org/pypi/iron_celery
+
+    To install the iron_celery package use `pip` or `easy_install`:
+
+    .. code-block:: bash
+
+        $ pip install iron_celery
+
+IronCache is configured via the URL provided in :setting:`CELERY_RESULT_BACKEND`, for example::
+
+    CELERY_RESULT_BACKEND = 'ironcache://project_id:token@'
+
+Or to change the cache name::
+
+    ironcache:://project_id:token@/awesomecache
+
+For more information, see: https://github.com/iron-io/iron_celery
+
 .. _conf-messaging:
 
 Message Routing
@@ -777,15 +808,10 @@ manner using TCP/IP alone, so AMQP defines something called heartbeats
 that's is used both by the client and the broker to detect if
 a connection was closed.
 
-Heartbeats are currently only supported by the ``pyamqp://`` transport,
-and this requires the :mod:`amqp` module:
+Hartbeats are disabled by default.
 
-.. code-block:: bash
-
-    $ pip install amqp
-
-The default heartbeat value is 10 seconds,
-the heartbeat will then be monitored at the interval specified
+If the heartbeat value is 10 seconds, then
+the heartbeat will be monitored at the interval specified
 by the :setting:`BROKER_HEARTBEAT_CHECKRATE` setting, which by default is
 double the rate of the heartbeat value
 (so for the default 10 seconds, the heartbeat is checked every 5 seconds).
@@ -962,6 +988,27 @@ Result backends caches ready results used by the client.
 This is the total number of results to cache before older results are evicted.
 The default is 5000.
 
+.. setting:: CELERY_CHORD_PROPAGATES
+
+CELERY_CHORD_PROPAGATES
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. versionadded:: 3.0.14
+
+This setting defines what happens when a task part of a chord raises an
+exception:
+
+- If propagate is True the chord callback will change state to FAILURE
+  with the exception value set to a :exc:`~celery.exceptions.ChordError`
+  instance containing information about the error and the task that failed.
+
+    This is the default behavior in Celery 3.1+
+
+- If propagate is False the exception value will instead be forwarded
+  to the chord callback.
+
+    This was the default behavior before version 3.1.
+
 .. setting:: CELERY_TRACK_STARTED
 
 CELERY_TRACK_STARTED
@@ -1056,6 +1103,8 @@ A sequence of modules to import when the worker starts.
 This is used to specify the task modules to import, but also
 to import signal handlers and additional remote control commands, etc.
 
+The modules will be imported in the original order.
+
 .. setting:: CELERY_INCLUDE
 
 CELERY_INCLUDE
@@ -1063,6 +1112,9 @@ CELERY_INCLUDE
 
 Exact same semantics as :setting:`CELERY_IMPORTS`, but can be used as a means
 to have different import categories.
+
+The modules in this setting are imported after the modules in
+:setting:`CELERY_IMPORTS`.
 
 .. setting:: CELERYD_FORCE_EXECV
 
@@ -1356,11 +1408,10 @@ CELERYD_HIJACK_ROOT_LOGGER
 
 .. versionadded:: 2.2
 
-By default any previously configured logging options will be reset,
-because the Celery programs "hijacks" the root logger.
-
-If you want to customize your own logging then you can disable
-this behavior.
+By default any previously configured handlers on the root logger will be
+removed. If you want to customize your own logging handlers, then you
+can disable this behavior by setting
+`CELERYD_HIJACK_ROOT_LOGGER = False`.
 
 .. note::
 

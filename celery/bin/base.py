@@ -6,6 +6,9 @@
 Preload Options
 ---------------
 
+These options are supported by all commands,
+and usually parsed before command-specific arguments.
+
 .. cmdoption:: -A, --app
 
     app instance to use (e.g. module.attr_name)
@@ -26,6 +29,10 @@ Preload Options
 
 Daemon Options
 --------------
+
+These options are supported by commands that can detach
+into the background (daemon).  They will be present
+in any command that also has a `--detach` option.
 
 .. cmdoption:: -f, --logfile
 
@@ -400,6 +407,10 @@ class Command(object):
                 if getattr(sym, '__path__', None):
                     return self.find_app('{0}.celery:'.format(
                                          app.replace(':', '')))
+                from celery.app.base import Celery
+                for suspect in vars(sym).itervalues():
+                    if isinstance(suspect, Celery):
+                        return suspect
                 raise
         return sym
 

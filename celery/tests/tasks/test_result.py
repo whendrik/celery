@@ -334,7 +334,8 @@ class SimpleBackend(object):
             self.ids = ids
 
         def get_many(self, *args, **kwargs):
-            return ((id, {'result': i}) for i, id in enumerate(self.ids))
+            return ((id, {'result': i, 'status': states.SUCCESS})
+                    for i, id in enumerate(self.ids))
 
 
 class test_TaskSetResult(AppCase):
@@ -578,10 +579,10 @@ class test_serializable(AppCase):
 
     def test_AsyncResult(self):
         x = AsyncResult(uuid())
-        self.assertEqual(x, from_serializable(x.serializable()))
-        self.assertEqual(x, from_serializable(x))
+        self.assertEqual(x, from_serializable(x.serializable(), self.app))
+        self.assertEqual(x, from_serializable(x, self.app))
 
     def test_GroupResult(self):
         x = GroupResult(uuid(), [AsyncResult(uuid()) for _ in range(10)])
-        self.assertEqual(x, from_serializable(x.serializable()))
-        self.assertEqual(x, from_serializable(x))
+        self.assertEqual(x, from_serializable(x.serializable(), self.app))
+        self.assertEqual(x, from_serializable(x, self.app))

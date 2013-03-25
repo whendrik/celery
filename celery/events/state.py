@@ -47,7 +47,7 @@ Substantial drift from %s may mean clocks are out of sync.  Current drift is
 """
 
 logger = get_logger(__name__)
-warn = logger.warn
+warn = logger.warning
 
 
 def heartbeat_expires(timestamp, freq=60,
@@ -277,15 +277,11 @@ class State(object):
     def __init__(self, callback=None,
                  max_workers_in_memory=5000, max_tasks_in_memory=10000):
         self.max_workers_in_memory = max_workers_in_memory
-        self.max_tasks_in_memory = 10000
+        self.max_tasks_in_memory = max_tasks_in_memory
         self.workers = LRUCache(limit=self.max_workers_in_memory)
         self.tasks = LRUCache(limit=self.max_tasks_in_memory)
         self._taskheap = []
         self.event_callback = callback
-        self.group_handlers = {
-            'worker': self.worker_event,
-            'task': self.task_event,
-        }
         self._mutex = threading.Lock()
 
     def freeze_while(self, fun, *args, **kwargs):
@@ -359,8 +355,8 @@ class State(object):
 
     def task_event(self, type, fields):
         """Process task event."""
-        uuid = fields.pop('uuid')
-        hostname = fields.pop('hostname')
+        uuid = fields['uuid']
+        hostname = fields['hostname']
         worker, _ = self.get_or_create_worker(hostname)
         task, created = self.get_or_create_task(uuid)
         task.worker = worker
@@ -389,8 +385,8 @@ class State(object):
     def _dispatch_event(self, event):
         self.event_count += 1
         event = kwdict(event)
-        group, _, subject = event.pop('type').partition('-')
-        self.group_handlers[group](subject, event)
+        group, _, subject = event['type'].partition('-')
+        getattr(self, group + '_event')(subject, event)
         if self.event_callback:
             self.event_callback(self, event)
 
@@ -445,5 +441,12 @@ class State(object):
         return '<State: events={0.event_count} tasks={0.task_count}>' \
             .format(self)
 
+    def __getstate__(self):
+        d = dict(vars(self))
+        d.pop('_mutex')
+        return d
 
+    def __setstate__(self, state):
+        self.__dict__ = state
+        self._mutex = threading.Lock()
 state = State()

@@ -66,18 +66,57 @@ def add_unlock_chord_task(app):
 
     """
     from celery.canvas import subtask
-    from celery import result as _res
+    from celery.exceptions import ChordError
+    from celery.result import from_serializable
+
+    default_propagate = app.conf.CELERY_CHORD_PROPAGATES
 
     @app.task(name='celery.chord_unlock', max_retries=None,
               default_retry_delay=1, ignore_result=True, _force_evaluate=True)
-    def unlock_chord(group_id, callback, interval=None, propagate=False,
-                     max_retries=None, result=None, Result=_res.AsyncResult):
+    def unlock_chord(group_id, callback, interval=None, propagate=None,
+                     max_retries=None, result=None,
+                     Result=app.AsyncResult, GroupResult=app.GroupResult,
+                     from_serializable=from_serializable):
+        # if propagate is disabled exceptions raised by chord tasks
+        # will be sent as part of the result list to the chord callback.
+        # Since 3.1 propagate will be enabled by default, and instead
+        # the chord callback changes state to FAILURE with the
+        # exception set to ChordError.
+        propagate = default_propagate if propagate is None else propagate
         if interval is None:
             interval = unlock_chord.default_retry_delay
-        result = _res.GroupResult(group_id, [Result(r) for r in result])
-        j = result.join_native if result.supports_native_join else result.join
-        if result.ready():
-            subtask(callback).delay(j(propagate=propagate))
+
+        # check if the task group is ready, and if so apply the callback.
+        deps = GroupResult(
+            group_id,
+            [from_serializable(r, app=app) for r in result],
+        )
+        j = deps.join_native if deps.supports_native_join else deps.join
+
+        if deps.ready():
+            callback = subtask(callback)
+            try:
+                ret = j(propagate=propagate)
+            except Exception as exc:
+                try:
+                    culprit = next(deps._failed_join_report())
+                    reason = 'Dependency {0.id} raised {1!r}'.format(
+                        culprit, exc,
+                    )
+                except StopIteration:
+                    reason = repr(exc)
+
+                app._tasks[callback.task].backend.fail_from_current_stack(
+                    callback.id, exc=ChordError(reason),
+                )
+            else:
+                try:
+                    callback.delay(ret)
+                except Exception as exc:
+                    app._tasks[callback.task].backend.fail_from_current_stack(
+                        callback.id,
+                        exc=ChordError('Callback error: {0!r}'.format(exc)),
+                    )
         else:
             return unlock_chord.retry(countdown=interval,
                                       max_retries=max_retries)
@@ -129,7 +168,7 @@ def add_group_task(app):
 
         def run(self, tasks, result, group_id, partial_args):
             app = self.app
-            result = from_serializable(result)
+            result = from_serializable(result, app)
             # any partial args are added to all tasks in the group
             taskit = (subtask(task).clone(partial_args)
                       for i, task in enumerate(tasks))
@@ -273,6 +312,7 @@ def add_chord_task(app):
     from celery import group
     from celery.canvas import maybe_subtask
     _app = app
+    default_propagate = app.conf.CELERY_CHORD_PROPAGATES
 
     class Chord(app.Task):
         app = _app
@@ -281,7 +321,8 @@ def add_chord_task(app):
         ignore_result = False
 
         def run(self, header, body, partial_args=(), interval=1, countdown=1,
-                max_retries=None, propagate=False, eager=False, **kwargs):
+                max_retries=None, propagate=None, eager=False, **kwargs):
+            propagate = default_propagate if propagate is None else propagate
             group_id = uuid()
             AsyncResult = self.app.AsyncResult
             prepare_member = self._prepare_member

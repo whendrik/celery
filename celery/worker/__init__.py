@@ -111,8 +111,8 @@ class WorkController(configurated):
         self._finalize = Finalize(self, self.stop, exitpriority=1)
         self.setup_instance(**self.prepare_args(**kwargs))
 
-    def setup_instance(self, queues=None, ready_callback=None,
-                       pidfile=None, include=None, **kwargs):
+    def setup_instance(self, queues=None, ready_callback=None, pidfile=None,
+                       include=None, use_eventloop=None, **kwargs):
         self.pidfile = pidfile
         self.setup_defaults(kwargs, namespace='celeryd')
         self.setup_queues(queues)
@@ -128,7 +128,12 @@ class WorkController(configurated):
         # Options
         self.loglevel = mlevel(self.loglevel)
         self.ready_callback = ready_callback or self.on_consumer_ready
-        self.use_eventloop = self.should_use_eventloop()
+        # this connection is not established, only used for params
+        self._conninfo = self.app.connection()
+        self.use_eventloop = (
+            self.should_use_eventloop() if use_eventloop is None
+            else use_eventloop
+        )
         self.options = kwargs
 
         signals.worker_init.send(sender=self)
@@ -236,7 +241,7 @@ class WorkController(configurated):
 
     def should_use_eventloop(self):
         return (detect_environment() == 'default' and
-                self.app.connection().is_evented and not self.app.IS_WINDOWS)
+                self._conninfo.is_evented and not self.app.IS_WINDOWS)
 
     def stop(self, in_sighandler=False):
         """Graceful shutdown of the worker server."""

@@ -37,9 +37,11 @@ from celery.utils.timeutils import maybe_iso8601, timezone, maybe_make_aware
 
 from . import state
 
+IS_PYPY = hasattr(sys, 'pypy_version_info')
+
 logger = get_logger(__name__)
 debug, info, warn, error = (logger.debug, logger.info,
-                            logger.warn, logger.error)
+                            logger.warning, logger.error)
 _does_info = False
 _does_debug = False
 
@@ -65,13 +67,14 @@ NEEDS_KWDICT = sys.version_info <= (2, 6)
 
 class Request(object):
     """A request for task execution."""
-
-    __slots__ = (
-        'app', 'name', 'id', 'args', 'kwargs', 'on_ack', 'delivery_info',
-        'hostname', 'eventer', 'connection_errors', 'task', 'eta', 'expires',
-        'request_dict', 'acknowledged', 'utc', 'time_start', 'worker_pid',
-        '_already_revoked', '_terminate_on_ack', '_tzlocal',
-    )
+    if not IS_PYPY:
+        __slots__ = (
+            'app', 'name', 'id', 'args', 'kwargs', 'on_ack', 'delivery_info',
+            'hostname', 'eventer', 'connection_errors', 'task', 'eta',
+            'expires', 'request_dict', 'acknowledged', 'utc', 'time_start',
+            'worker_pid', '_already_revoked', '_terminate_on_ack', '_tzlocal',
+            '__weakref__',
+        )
 
     ignored_msg = """\
         Task %(name)s[%(id)s] ignored

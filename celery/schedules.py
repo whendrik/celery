@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from kombu.utils import cached_property
 
 from . import current_app
-from .five import string_t
+from .five import range, string_t
 from .utils import is_iterable
 from .utils.timeutils import (
     timedelta_seconds, weekday, maybe_timedelta, remaining,
@@ -34,9 +34,14 @@ Argument cronspec needs to be of any of the following types: \
 int, str, or an iterable type. {type!r} was given.\
 """
 
+CRON_REPR = """\
+<crontab: {0._orig_minute} {0._orig_hour} {0._orig_day_of_week} \
+{0._orig_day_of_month} {0._orig_month_of_year} (m/h/d/dM/MY)>\
+"""
 
-def _weak_bool(s):
-    return 0 if s == '0' else s
+
+def cronfield(s):
+    return '*' if s is None else s
 
 
 class ParseException(Exception):
@@ -208,10 +213,9 @@ class crontab_parser(object):
         if len(toks) > 1:
             to = self._expand_number(toks[1])
             if to < fr:  # Wrap around max_ if necessary
-                return range(fr,
-                             self.min_ + self.max_) + range(self.min_,
-                                                            to + 1)
-            return range(fr, to + 1)
+                return (list(range(fr, self.min_ + self.max_)) +
+                        list(range(self.min_, to + 1)))
+            return list(range(fr, to + 1))
         return [fr]
 
     def _range_steps(self, toks):
@@ -225,7 +229,7 @@ class crontab_parser(object):
         return self._expand_star()[::int(toks[0])]
 
     def _expand_star(self, *args):
-        return range(self.min_, self.max_ + self.min_)
+        return list(range(self.min_, self.max_ + self.min_))
 
     def _expand_number(self, s):
         if isinstance(s, string_t) and s[0] == '-':
@@ -423,11 +427,11 @@ class crontab(schedule):
 
     def __init__(self, minute='*', hour='*', day_of_week='*',
                  day_of_month='*', month_of_year='*', nowfun=None):
-        self._orig_minute = minute
-        self._orig_hour = hour
-        self._orig_day_of_week = day_of_week
-        self._orig_day_of_month = day_of_month
-        self._orig_month_of_year = month_of_year
+        self._orig_minute = cronfield(minute)
+        self._orig_hour = cronfield(hour)
+        self._orig_day_of_week = cronfield(day_of_week)
+        self._orig_day_of_month = cronfield(day_of_month)
+        self._orig_month_of_year = cronfield(month_of_year)
         self.hour = self._expand_cronspec(hour, 24)
         self.minute = self._expand_cronspec(minute, 60)
         self.day_of_week = self._expand_cronspec(day_of_week, 7)
@@ -439,13 +443,7 @@ class crontab(schedule):
         return (self.nowfun or self.app.now)()
 
     def __repr__(self):
-        return ('<crontab: %s %s %s %s %s (m/h/d/dM/MY)>' % (
-            _weak_bool(self._orig_minute) or '*',
-            _weak_bool(self._orig_hour) or '*',
-            _weak_bool(self._orig_day_of_week) or '*',
-            _weak_bool(self._orig_day_of_month) or '*',
-            _weak_bool(self._orig_month_of_year) or '*',
-        ))
+        return CRON_REPR.format(self)
 
     def __reduce__(self):
         return (self.__class__, (self._orig_minute,
