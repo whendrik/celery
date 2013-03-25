@@ -80,6 +80,8 @@ def bench_work(n=DEFAULT_ITS, loglevel='CRITICAL'):
     loglevel = os.environ.get('BENCH_LOGLEVEL') or loglevel
     if loglevel:
         celery.log.setup_logging_subsystem(loglevel=loglevel)
+    from celery.task import trace
+    trace.setup_worker_optimizations(celery)
     worker = celery.WorkController(concurrency=15,
                                    queues=['bench.worker'])
 

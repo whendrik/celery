@@ -67,7 +67,7 @@ Will retry using next failover.\
 UNKNOWN_FORMAT = """\
 Received and deleted unknown message. Wrong destination?!?
 
-The full contents of the message body was: %s
+The contents of the message body was: %s
 """
 
 #: Error message for when an unregistered task is received.
@@ -79,7 +79,7 @@ Did you remember to import the module containing this task?
 Or maybe you are using relative imports?
 Please see http://bit.ly/gLye1c for more information.
 
-The full contents of the message body was:
+The contents of the message body was:
 %s
 """
 
@@ -91,17 +91,18 @@ The message has been ignored and discarded.
 Please ensure your message conforms to the task
 message protocol as described here: http://bit.ly/hYj41y
 
-The full contents of the message body was:
+The contents of the message body was:
 %s
 """
 
 MESSAGE_REPORT = """\
-body: {0} {{content_type:{1} content_encoding:{2} delivery_info:{3}}}\
+headers: {0}
+body: {1} {{content_type:{2} content_encoding:{3} delivery_info:{4}}}\
 """
 
 
-def dump_body(m, body):
-    return '{0} ({1}b)'.format(truncate(safe_repr(body), 1024),
+def dump_body(m):
+    return '{0} ({1}b)'.format(truncate(safe_repr(m.body), 1024),
                                len(m.body))
 
 
@@ -260,7 +261,7 @@ class Consumer(object):
         """
         crit("Can't decode message body: %r (type:%r encoding:%r raw:%r')",
              exc, message.content_type, message.content_encoding,
-             dump_body(message, message.body))
+             dump_body(message))
         message.ack()
 
     def on_close(self):
@@ -331,22 +332,23 @@ class Consumer(object):
         self.handle_task(task)
         self.qos.decrement_eventually()
 
-    def _message_report(self, body, message):
-        return MESSAGE_REPORT.format(dump_body(message, body),
+    def _message_report(self, message):
+        return MESSAGE_REPORT.format(safe_repr(message.headers),
+                                     dump_body(message),
                                      safe_repr(message.content_type),
                                      safe_repr(message.content_encoding),
                                      safe_repr(message.delivery_info))
 
-    def handle_unknown_message(self, body, message):
-        warn(UNKNOWN_FORMAT, self._message_report(body, message))
+    def handle_unknown_message(self, message):
+        warn(UNKNOWN_FORMAT, self._message_report(message))
         message.reject_log_error(logger, self.connection_errors)
 
-    def handle_unknown_task(self, body, message, exc):
-        error(UNKNOWN_TASK_ERROR, exc, dump_body(message, body), exc_info=True)
+    def handle_unknown_task(self, message, exc):
+        error(UNKNOWN_TASK_ERROR, exc, dump_body(message), exc_info=True)
         message.reject_log_error(logger, self.connection_errors)
 
-    def handle_invalid_task(self, body, message, exc):
-        error(INVALID_TASK_ERROR, exc, dump_body(message, body), exc_info=True)
+    def handle_invalid_task(self, message, exc):
+        error(INVALID_TASK_ERROR, exc, dump_body(message), exc_info=True)
         message.reject_log_error(logger, self.connection_errors)
 
     def update_strategies(self):
