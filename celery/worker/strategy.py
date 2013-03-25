@@ -10,8 +10,6 @@ from __future__ import absolute_import
 
 import logging
 
-from kombu.utils.encoding import safe_repr
-
 from celery.utils.log import get_logger
 from celery.utils.timer2 import to_timestamp
 from celery.utils.timeutils import timezone
@@ -39,8 +37,10 @@ def default(task, app, consumer,
     handle = consumer.handle_task
     limit_task = consumer._limit_task
 
-    def task_message_handler(message, body, ack, to_timestamp=to_timestamp):
-        req = Req(body, on_ack=ack, app=app, hostname=hostname,
+    def task_message_handler(message, ack, to_timestamp=to_timestamp):
+        req = Req(message.headers, message.body,
+                  message.content_type, message.content_encoding,
+                  on_ack=ack, app=app, hostname=hostname,
                   eventer=eventer, task=task,
                   connection_errors=connection_errors,
                   delivery_info=message.delivery_info)
@@ -54,8 +54,11 @@ def default(task, app, consumer,
             send_event(
                 'task-received',
                 uuid=req.id, name=req.name,
-                args=safe_repr(req.args), kwargs=safe_repr(req.kwargs),
-                retries=req.request_dict.get('retries', 0),
+                #args=safe_repr(req.args), kwargs=safe_repr(req.kwargs),
+                args='',  # XXX
+                kwargs='',  # XXX
+                #retries=req.request_dict.get('retries', 0),
+                retries=0,  # XXX
                 eta=req.eta and req.eta.isoformat(),
                 expires=req.expires and req.expires.isoformat(),
             )
@@ -81,5 +84,4 @@ def default(task, app, consumer,
                     return limit_task(req, bucket, 1)
             task_reserved(req)
             handle(req)
-
     return task_message_handler

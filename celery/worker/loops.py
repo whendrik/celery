@@ -46,22 +46,22 @@ def asynloop(obj, connection, consumer, strategies, ns, hub, qos,
             hub.timer.apply_interval(
                 heartbeat * 1000.0 / hbrate, hbtick, (hbrate, ))
 
-        def on_task_received(body, message):
+        def on_task_received(message):
             if on_task_callbacks:
                 [callback() for callback in on_task_callbacks]
             try:
-                name = body['task']
+                name = message.headers['task']
             except (KeyError, TypeError):
-                return handle_unknown_message(body, message)
+                return handle_unknown_message(message)
 
             try:
-                strategies[name](message, body, message.ack_log_error)
+                strategies[name](message, message.ack_log_error)
             except KeyError as exc:
-                handle_unknown_task(body, message, exc)
+                handle_unknown_task(message, exc)
             except InvalidTaskError as exc:
-                handle_invalid_task(body, message, exc)
+                handle_invalid_task(message, exc)
 
-        consumer.callbacks = [on_task_received]
+        consumer.on_message = on_task_received
         consumer.consume()
         obj.on_ready()
 
@@ -124,20 +124,20 @@ def synloop(obj, connection, consumer, strategies, ns, hub, qos,
             handle_invalid_task, clock, hbrate=2.0, **kwargs):
     """Fallback blocking eventloop for transports that doesn't support AIO."""
 
-    def on_task_received(body, message):
+    def on_task_received(message):
         try:
-            name = body['task']
+            name = message.headers['task']
         except (KeyError, TypeError):
-            return handle_unknown_message(body, message)
+            return handle_unknown_message(message)
 
         try:
-            strategies[name](message, body, message.ack_log_error)
+            strategies[name](message, message.ack_log_error)
         except KeyError as exc:
-            handle_unknown_task(body, message, exc)
+            handle_unknown_task(message, exc)
         except InvalidTaskError as exc:
-            handle_invalid_task(body, message, exc)
+            handle_invalid_task(message, exc)
 
-    consumer.register_callback(on_task_received)
+    consumer.on_message = on_task_received
     consumer.consume()
 
     obj.on_ready()

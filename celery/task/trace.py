@@ -23,6 +23,7 @@ import sys
 from time import time
 from warnings import warn
 
+from kombu.serialization import decode as decode_message
 from kombu.utils import kwdict
 from kombu.utils.encoding import safe_repr, safe_str
 
@@ -32,7 +33,7 @@ from celery._state import _task_stack
 from celery.app import set_default_app
 from celery.app.task import Task as BaseTask, Context
 from celery.datastructures import ExceptionInfo
-from celery.exceptions import Ignore, RetryTaskError
+from celery.exceptions import Ignore, RetryTaskError, InvalidTaskError
 from celery.utils.log import get_logger
 from celery.utils.objects import mro_lookup
 from celery.utils.serialization import (
@@ -56,6 +57,7 @@ LOG_RETRY = 'Task %(name)s[%(id)s] retry: %(exc)s'
 
 logger = get_logger(__name__)
 info = logger.info
+NEEDS_KWDICT = sys.version_info <= (2, 6)
 
 send_prerun = signals.task_prerun.send
 send_postrun = signals.task_postrun.send
@@ -250,10 +252,21 @@ def build_tracer(name, task, loader=None, hostname=None, store_errors=True,
     subtask = canvas.subtask
 
     def trace_task(uuid, args, kwargs, request=None):
+        # R - real retval
+        # I - Info object
+        # T - total runtime
+        # Rstr - repr of retval
         R = I = T = Rstr = None
-        kwargs = kwdict(kwargs)
-        time_start = time()
         try:
+            time_start = time()
+            try:
+                kwargs.items
+            except AttributeError:
+                raise InvalidTaskError(
+                    'Task keyword arguments is not a mapping',
+                )
+            if NEEDS_KWDICT:
+                kwargs = kwdict(kwargs)
             push_task(task)
             task_request = Context(request or {}, args=args,
                                    called_directly=False, kwargs=kwargs)
@@ -359,10 +372,17 @@ def _trace_task_ret(name, uuid, args, kwargs, request={}, **opts):
 trace_task_ret = _trace_task_ret
 
 
-def _fast_trace_task(task, uuid, args, kwargs, request={}):
+def _fast_trace_task(task, uuid, headers, body, content_type,
+                     content_encoding, decode_message=decode_message,
+                     **request):
     # setup_worker_optimizations will point trace_task_ret to here,
     # so this is the function used in the worker.
-    R, I, T, Rstr = _tasks[task].__trace__(uuid, args, kwargs, request)
+    payload = decode_message(body, content_type, content_encoding)
+    payload.update(request)
+    payload.update(headers)
+    R, I, T, Rstr = _tasks[task].__trace__(
+        uuid, payload['args'], payload['kwargs'], payload,
+    )
     return R if I else Rstr, T
 
 

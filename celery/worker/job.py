@@ -15,7 +15,7 @@ import sys
 
 from datetime import datetime
 
-from kombu.utils import kwdict, reprcall
+from kombu.utils import reprcall
 from kombu.utils.encoding import safe_repr, safe_str
 
 from celery import exceptions
@@ -45,6 +45,8 @@ debug, info, warn, error = (logger.debug, logger.info,
 _does_info = False
 _does_debug = False
 
+DEFAULT_TIMEOUTS = (None, None)
+
 
 def __optimize__():
     # this is also called by celery.task.trace.setup_worker_optimizations
@@ -63,16 +65,15 @@ task_accepted = state.task_accepted
 task_ready = state.task_ready
 revoked_tasks = state.revoked
 
-NEEDS_KWDICT = sys.version_info <= (2, 6)
-
 
 class Request(object):
     """A request for task execution."""
     if not IS_PYPY:
         __slots__ = (
-            'app', 'name', 'id', 'args', 'kwargs', 'on_ack', 'delivery_info',
+            'app', 'name', 'id', 'on_ack', 'delivery_info',
+            'body', 'headers', 'content_type', 'content_encoding',
             'hostname', 'eventer', 'connection_errors', 'task', 'eta',
-            'expires', 'request_dict', 'acknowledged', 'utc', 'time_start',
+            'expires', 'acknowledged', 'utc', 'time_start', 'timeouts',
             'worker_pid', '_already_revoked', '_terminate_on_ack', '_tzlocal',
             '__weakref__',
         )
@@ -81,25 +82,23 @@ class Request(object):
         Task %(name)s[%(id)s] ignored
     """
 
-    def __init__(self, body, on_ack=noop,
-                 hostname=None, eventer=None, app=None,
-                 connection_errors=None, request_dict=None,
-                 delivery_info=None, task=None, **opts):
+    def __init__(self, headers, body, content_type, content_encoding,
+                 on_ack=noop, hostname=None, eventer=None, app=None,
+                 connection_errors=None, delivery_info=None,
+                 task=None, **opts):
         self.app = app or app_or_default(app)
-        name = self.name = body['task']
-        self.id = body['id']
-        self.args = body.get('args', [])
-        self.kwargs = body.get('kwargs', {})
-        try:
-            self.kwargs.items
-        except AttributeError:
-            raise exceptions.InvalidTaskError(
-                'Task keyword arguments is not a mapping')
-        if NEEDS_KWDICT:
-            self.kwargs = kwdict(self.kwargs)
-        eta = body.get('eta')
-        expires = body.get('expires')
-        utc = self.utc = body.get('utc', False)
+        self.body = body
+        self.headers = headers
+        self.content_type = content_type
+        self.content_encoding = content_encoding
+        name = self.name = headers['task']
+        self.id = headers['task_id']
+        self.body = body
+        eta = headers['eta'] if 'eta' in headers else None
+        expires = headers['expires'] if 'expires' in headers else None
+        utc = self.utc = headers['utc'] if 'utc' in headers else False
+        self.timeouts = (headers['timeouts'] if 'timeouts' in headers
+                         else DEFAULT_TIMEOUTS)
         self.on_ack = on_ack
         self.hostname = hostname or socket.gethostname()
         self.eventer = eventer
@@ -130,7 +129,6 @@ class Request(object):
             'routing_key': delivery_info.get('routing_key'),
             'priority': delivery_info.get('priority'),
         }
-        self.request_dict = body
 
     @classmethod
     def from_message(cls, message, body, **kwargs):
@@ -179,27 +177,27 @@ class Request(object):
         task = self.task
         if self.revoked():
             raise TaskRevokedError(self.id)
+        body = self.body
 
-        hostname = self.hostname
-        kwargs = self.kwargs
-        if task.accept_magic_kwargs:
-            kwargs = self.extend_with_default_kwargs()
-        request = self.request_dict
-        request.update({'hostname': hostname, 'is_eager': False,
-                        'delivery_info': self.delivery_info,
-                        'group': self.request_dict.get('taskset')})
-        timeout, soft_timeout = request.get('timeouts', (None, None))
-        timeout = timeout or task.time_limit
-        soft_timeout = soft_timeout or task.soft_time_limit
-        result = pool.apply_async(trace_task_ret,
-                                  args=(self.name, self.id,
-                                        self.args, kwargs, request),
-                                  accept_callback=self.on_accepted,
-                                  timeout_callback=self.on_timeout,
-                                  callback=self.on_success,
-                                  error_callback=self.on_failure,
-                                  soft_timeout=soft_timeout,
-                                  timeout=timeout)
+        timeout, soft_timeout = self.timeouts
+        result = pool.apply_async(
+            trace_task_ret,
+            args=(self.name, self.id,
+                  self.headers,
+                  bytes(body) if isinstance(body, buffer) else body,
+                  self.content_type, self.content_encoding),
+            kwargs={
+                'hostname': self.hostname,
+                'is_eager': False,
+                'delivery_info': self.delivery_info,
+            },
+            accept_callback=self.on_accepted,
+            timeout_callback=self.on_timeout,
+            callback=self.on_success,
+            error_callback=self.on_failure,
+            soft_timeout=soft_timeout or task.soft_time_limit,
+            timeout=timeout or task.time_limit,
+        )
         return result
 
     def execute(self, loglevel=None, logfile=None):
@@ -348,7 +346,6 @@ class Request(object):
             # (acks_late) acknowledge after result stored.
             if self.task.acks_late:
                 self.acknowledge()
-
         self.send_event(
             'task-failed',
             exception=safe_repr(get_pickled_exception(exc_info.exception)),
@@ -364,8 +361,10 @@ class Request(object):
     def info(self, safe=False):
         return {'id': self.id,
                 'name': self.name,
-                'args': self.args if safe else safe_repr(self.args),
-                'kwargs': self.kwargs if safe else safe_repr(self.kwargs),
+                #'args': self.args if safe else safe_repr(self.args),
+                #'kwargs': self.kwargs if safe else safe_repr(self.kwargs),
+                'args': '',  # XXX
+                'kwargs': '',  # XXX
                 'hostname': self.hostname,
                 'time_start': self.time_start,
                 'acknowledged': self.acknowledged,
@@ -381,7 +380,7 @@ class Request(object):
     def __repr__(self):
         return '<{0} {1}: {2}>'.format(
             type(self).__name__, self.id,
-            reprcall(self.name, self.args, self.kwargs))
+            reprcall(self.name, '', ''))  # XXX
 
     @property
     def tzlocal(self):
