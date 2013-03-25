@@ -276,6 +276,7 @@ class Celery(object):
         else:
             with self.amqp.producer_pool.acquire(block=True) as producer:
                 yield producer
+        print('HELLO')
     default_producer = producer_or_acquire  # XXX compat
 
     def with_default_connection(self, fun):

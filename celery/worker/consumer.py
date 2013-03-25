@@ -109,7 +109,7 @@ PREFETCH_COUNT_MAX = 0xFFFF
 UNKNOWN_FORMAT = """\
 Received and deleted unknown message. Wrong destination?!?
 
-The full contents of the message body was: %s
+The contents of the message body was: %s
 """
 #: Error message for when an unregistered task is received.
 UNKNOWN_TASK_ERROR = """\
@@ -120,7 +120,7 @@ Did you remember to import the module containing this task?
 Or maybe you are using relative imports?
 More: http://docs.celeryq.org/en/latest/userguide/tasks.html#names
 
-The full contents of the message body was:
+The contents of the message body was:
 %s
 """
 
@@ -132,11 +132,12 @@ The message has been ignored and discarded.
 Please ensure your message conforms to the task message format:
 http://docs.celeryq.org/en/latest/internals/protocol.html
 
-The full contents of the message body was:
+The contents of the message body was:
 %s
 """
 
 MESSAGE_REPORT = """\
+headers: %s
 body: %s {content_type:%s content_encoding:%s delivery_info:%s}\
 """
 
@@ -170,8 +171,8 @@ def debug(msg, *args, **kwargs):
     logger.debug('consumer: %s' % (msg, ), *args, **kwargs)
 
 
-def dump_body(m, body):
-    return "%s (%sb)" % (text.truncate(safe_repr(body), 1024), len(m.body))
+def dump_body(m):
+    return "%s (%sb)" % (text.truncate(safe_repr(m.body), 1024), len(m.body))
 
 
 class Component(StartStopComponent):
@@ -425,21 +426,23 @@ class Consumer(object):
                 hub.timer.apply_interval(
                     hb * 1000.0 / hbrate, hbtick, (hbrate, ))
 
-            def on_task_received(body, message):
+            def on_task_received(message):
+                print('RECEIVED: %r' % (message, ))
+                headers = message.headers
                 if on_task_callbacks:
                     [callback() for callback in on_task_callbacks]
                 try:
-                    name = body['task']
+                    name = headers['task']
                 except (KeyError, TypeError):
-                    return self.handle_unknown_message(body, message)
+                    return self.handle_unknown_message(message)
                 try:
-                    strategies[name](message, body, message.ack_log_error)
+                    strategies[name](message, message.ack_log_error)
                 except KeyError, exc:
-                    self.handle_unknown_task(body, message, exc)
+                    self.handle_unknown_task(message, exc)
                 except InvalidTaskError, exc:
-                    self.handle_invalid_task(body, message, exc)
+                    self.handle_invalid_task(message, exc)
 
-            self.task_consumer.callbacks = [on_task_received]
+            self.task_consumer.on_message = on_task_received
             self.task_consumer.consume()
 
             debug('Ready to accept tasks!')
@@ -558,42 +561,43 @@ class Consumer(object):
         self._quick_put(task)
         self.qos.decrement_eventually()
 
-    def _message_report(self, body, message):
-        return MESSAGE_REPORT % (dump_body(message, body),
+    def _message_report(self, message):
+        return MESSAGE_REPORT % (safe_repr(message.headers),
+                                 dump_body(message),
                                  safe_repr(message.content_type),
                                  safe_repr(message.content_encoding),
                                  safe_repr(message.delivery_info))
 
-    def handle_unknown_message(self, body, message):
-        warn(UNKNOWN_FORMAT, self._message_report(body, message))
+    def handle_unknown_message(self, message):
+        warn(UNKNOWN_FORMAT, self._message_report(message))
         message.reject_log_error(logger, self.connection_errors)
 
-    def handle_unknown_task(self, body, message, exc):
-        error(UNKNOWN_TASK_ERROR, exc, dump_body(message, body), exc_info=True)
+    def handle_unknown_task(self, message, exc):
+        error(UNKNOWN_TASK_ERROR, exc, dump_body(message), exc_info=True)
         message.reject_log_error(logger, self.connection_errors)
 
-    def handle_invalid_task(self, body, message, exc):
-        error(INVALID_TASK_ERROR, exc, dump_body(message, body), exc_info=True)
+    def handle_invalid_task(self, message, exc):
+        error(INVALID_TASK_ERROR, exc, dump_body(message), exc_info=True)
         message.reject_log_error(logger, self.connection_errors)
 
-    def receive_message(self, body, message):
+    def receive_message(self, message):
         """Handles incoming messages.
 
-        :param body: The message body.
         :param message: The kombu message object.
 
         """
+        headers = message.headers
         try:
-            name = body['task']
+            name = headers['task']
         except (KeyError, TypeError):
-            return self.handle_unknown_message(body, message)
+            return self.handle_unknown_message(message)
 
         try:
-            self.strategies[name](message, body, message.ack_log_error)
+            self.strategies[name](message, message.ack_log_error)
         except KeyError, exc:
-            self.handle_unknown_task(body, message, exc)
+            self.handle_unknown_task(message, exc)
         except InvalidTaskError, exc:
-            self.handle_invalid_task(body, message, exc)
+            self.handle_invalid_task(message, exc)
 
     def maybe_conn_error(self, fun):
         """Applies function but ignores any connection or channel

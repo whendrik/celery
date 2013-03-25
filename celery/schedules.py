@@ -376,11 +376,13 @@ class crontab(schedule):
 
         def roll_over():
             while 1:
+                print('moy: %r %r' % (datedata.moy, months_of_year))
                 flag = (datedata.dom == len(days_of_month) or
                         day_out_of_range(datedata.year,
                                          months_of_year[datedata.moy],
                                          days_of_month[datedata.dom]))
                 if flag:
+                    print('FLAG: %r' % (flag, ))
                     datedata.dom = 0
                     datedata.moy += 1
                     if datedata.moy == len(months_of_year):
@@ -389,6 +391,7 @@ class crontab(schedule):
                 else:
                     break
 
+        print('LAST_RUN_AT MONTH: %r' % (last_run_at.month, ))
         if last_run_at.month in self.month_of_year:
             datedata.dom = bisect(days_of_month, last_run_at.day)
             datedata.moy = bisect_left(months_of_year, last_run_at.month)
@@ -500,6 +503,7 @@ class crontab(schedule):
                     delta = self._delta_to_next(last_run_at,
                                                 next_hour, next_minute)
 
+        print('>>> DELTA: %r' % (delta, ))
         now = self.maybe_make_aware(self.now())
         return remaining(self.to_local(last_run_at), delta,
                          self.to_local(now))

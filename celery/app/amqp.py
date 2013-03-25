@@ -225,19 +225,24 @@ class TaskProducer(Producer):
         expires = expires and expires.isoformat()
 
         body = {
-            'task': task_name,
-            'id': task_id,
             'args': task_args,
             'kwargs': task_kwargs,
             'retries': retries or 0,
-            'eta': eta,
-            'expires': expires,
-            'utc': self.utc,
             'callbacks': callbacks,
             'errbacks': errbacks,
             'taskset': group_id or taskset_id,
             'chord': chord,
         }
+
+        headers = {
+            'task_id': task_id,
+            'task': task_name,
+            'utc': self.utc,
+        }
+        if eta:
+            headers['eta'] = eta
+        if expires:
+            headers['expires'] = expires
 
         self.publish(
             body,
@@ -246,6 +251,7 @@ class TaskProducer(Producer):
             compression=compression or self.compression,
             retry=retry, retry_policy=_rp,
             delivery_mode=delivery_mode, declare=declare,
+            headers=headers,
             **kwargs
         )
 
