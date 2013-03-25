@@ -28,12 +28,13 @@ from celery.utils.log import (
     get_logger, mlevel,
     ColorFormatter, ensure_process_aware_logger,
     LoggingProxy, get_multiprocessing_logger,
-    reset_multiprocessing_logger,
+    reset_multiprocessing_logger, current_process_index,
 )
 from celery.utils.term import colored
 
 PY3 = sys.version_info[0] == 3
 
+MP_INDEXED = '{name}-{index}{ext}'
 MP_LOG = os.environ.get('MP_LOG', False)
 
 
@@ -218,6 +219,11 @@ class Logging(object):
         logfile = sys.__stderr__ if logfile is None else logfile
         if hasattr(logfile, 'write'):
             return logging.StreamHandler(logfile)
+        index = current_process_index()
+        print('INDEX IS: %r' % (index, ))
+        if index is not None:
+            name, ext = os.path.splitext(logfile)
+            logfile = MP_INDEXED.format(name=name, ext=ext, index=index)
         return WatchedFileHandler(logfile)
 
     def _has_handler(self, logger):

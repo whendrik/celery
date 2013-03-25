@@ -153,7 +153,6 @@ class Consumer(object):
         self.connection_errors = conninfo.connection_errors
         self.channel_errors = conninfo.channel_errors
         self._restart_state = restart_state(maxR=5, maxT=1)
-
         self._does_info = logger.isEnabledFor(logging.INFO)
         self.handle_task = handle_task
         self.amqheartbeat_rate = self.app.conf.BROKER_HEARTBEAT_CHECKRATE
